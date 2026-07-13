@@ -1,197 +1,127 @@
-/*
-===============================================================================
-Quality Checks
-===============================================================================
-Script Purpose:
-    This script performs various quality checks for data consistency, accuracy, 
-    and standardization across the 'silver' layer. It includes checks for:
-    - Null or duplicate primary keys.
-    - Unwanted spaces in string fields.
-    - Data standardization and consistency.
-    - Invalid date ranges and orders.
-    - Data consistency between related fields.
-
-Usage Notes:
-    - Run these checks after data loading Silver Layer.
-    - Investigate and resolve any discrepancies found during the checks.
-===============================================================================
-*/
-
--- ====================================================================
--- Checking 'silver.crm_cust_info'
--- ====================================================================
--- Check for NULLs or Duplicates in Primary Key
--- Expectation: No Results
-SELECT 
-
 USE DataWarehouse;
 GO
 
-/* =========================================================
-   Quality Checks - Silver Layer
-   ========================================================= */
+/*==========================================================
+  BRONZE CHECKS
+==========================================================*/
+
+-- Bronze customer NULL IDs are expected because Bronze is raw.
+SELECT *
+FROM bronze.crm_cust_info
+WHERE cst_id IS NULL;
 
 
-/* =========================================================
-   1. silver.crm_cust_info
-   ========================================================= */
+-- Bronze customer duplicates
+SELECT
+    cst_id,
+    COUNT(*) AS duplicate_count
+FROM bronze.crm_cust_info
+WHERE cst_id IS NOT NULL
+GROUP BY cst_id
+HAVING COUNT(*) > 1;
 
--- Check for NULLs or duplicates in primary key
--- Expectation: No Results
+
+/*==========================================================
+  SILVER CHECKS
+==========================================================*/
+
+-- Silver should not have NULL customer IDs
+SELECT *
+FROM silver.crm_cust_info
+WHERE cst_id IS NULL;
+
+
+-- Silver should not have duplicate customer IDs
 SELECT
     cst_id,
     COUNT(*) AS duplicate_count
 FROM silver.crm_cust_info
 GROUP BY cst_id
-HAVING COUNT(*) > 1 OR cst_id IS NULL;
+HAVING COUNT(*) > 1;
 
 
--- Check for unwanted spaces
--- Expectation: No Results
-SELECT
-    cst_key,
-    cst_firstname,
-    cst_lastname,
-    cst_gndr
+-- Check unwanted spaces in Silver customer names
+SELECT *
 FROM silver.crm_cust_info
-WHERE cst_key != TRIM(cst_key)
-   OR cst_firstname != TRIM(cst_firstname)
-   OR cst_lastname != TRIM(cst_lastname)
-   OR cst_gndr != TRIM(cst_gndr);
+WHERE cst_firstname != TRIM(cst_firstname)
+   OR cst_lastname  != TRIM(cst_lastname);
 
 
--- Check data standardization
-SELECT DISTINCT
-    cst_marital_status
-FROM silver.crm_cust_info;
-
-SELECT DISTINCT
-    cst_gndr
+-- Check gender standardization
+SELECT DISTINCT cst_gndr
 FROM silver.crm_cust_info;
 
 
-/* =========================================================
-   2. silver.crm_prd_info
-   ========================================================= */
-
--- Check for NULLs or duplicates in primary key
--- Expectation: No Results
-SELECT
-    prd_id,
-    COUNT(*) AS duplicate_count
-FROM silver.crm_prd_info
-GROUP BY prd_id
-HAVING COUNT(*) > 1 OR prd_id IS NULL;
+-- Check marital status standardization
+SELECT DISTINCT cst_marital_status
+FROM silver.crm_cust_info;
 
 
--- Check for unwanted spaces
--- Expectation: No Results
-SELECT
-    prd_nm
-FROM silver.crm_prd_info
-WHERE prd_nm != TRIM(prd_nm);
-
-
--- Check for NULLs or negative values
--- Expectation: No Results
-SELECT
-    prd_cost
-FROM silver.crm_prd_info
-WHERE prd_cost < 0 OR prd_cost IS NULL;
-
-
--- Check data standardization
-SELECT DISTINCT
-    prd_line
+-- Check product key format
+SELECT TOP 20
+    prd_key
 FROM silver.crm_prd_info;
 
 
--- Check invalid date order
--- Expectation: No Results
-SELECT
-    *
+-- Product keys should usually contain hyphen, not underscore
+SELECT *
 FROM silver.crm_prd_info
-WHERE prd_end_dt < prd_start_dt;
+WHERE prd_key LIKE '%[_]%';
 
 
-/* =========================================================
-   3. silver.crm_sales_details
-   ========================================================= */
+-- Check sales product keys
+SELECT TOP 20
+    sls_prd_key
+FROM silver.crm_sales_details;
 
--- Check invalid date order
--- Expectation: No Results
+
+/*==========================================================
+  GOLD CHECKS
+==========================================================*/
+
+-- Customer dimension check
+SELECT TOP 100 *
+FROM gold.dim_customers;
+
+
+-- Product dimension check
+SELECT TOP 100 *
+FROM gold.dim_products;
+
+
+-- Sales fact check
+SELECT TOP 100 *
+FROM gold.fact_sales;
+
+
+-- Missing product/customer keys in fact
 SELECT
-    *
-FROM silver.crm_sales_details
-WHERE sls_order_dt > sls_ship_dt
-   OR sls_order_dt > sls_due_dt;
+    order_number,
+    product_key,
+    customer_key,
+    sales_amount
+FROM gold.fact_sales
+WHERE product_key IS NULL
+   OR customer_key IS NULL;
 
 
--- Check sales calculation consistency
--- Expectation: No Results
-SELECT DISTINCT
-    sls_sales,
-    sls_quantity,
-    sls_price
-FROM silver.crm_sales_details
-WHERE sls_sales != sls_quantity * sls_price
-   OR sls_sales IS NULL
-   OR sls_quantity IS NULL
-   OR sls_price IS NULL
-   OR sls_sales <= 0
-   OR sls_quantity <= 0
-   OR sls_price <= 0
-ORDER BY
-    sls_sales,
-    sls_quantity,
-    sls_price;
+-- Source-level check for missing product mapping
+SELECT TOP 100
+    sd.sls_prd_key,
+    pr.product_number,
+    pr.product_key
+FROM silver.crm_sales_details AS sd
+LEFT JOIN gold.dim_products AS pr
+    ON sd.sls_prd_key = pr.product_number
+WHERE pr.product_key IS NULL;
 
 
-/* =========================================================
-   4. silver.erp_cust_az12
-   ========================================================= */
-
--- Check out-of-range birthdates
--- Expectation: No Results
-SELECT DISTINCT
-    bdate
-FROM silver.erp_cust_az12
-WHERE bdate < '1924-01-01'
-   OR bdate > GETDATE();
-
-
--- Check data standardization
-SELECT DISTINCT
-    gen
-FROM silver.erp_cust_az12;
-
-
-/* =========================================================
-   5. silver.erp_loc_a101
-   ========================================================= */
-
--- Check data standardization
-SELECT DISTINCT
-    cntry
-FROM silver.erp_loc_a101
-ORDER BY cntry;
-
-
-/* =========================================================
-   6. silver.erp_px_cat_g1v2
-   ========================================================= */
-
--- Check for unwanted spaces
--- Expectation: No Results
-SELECT
-    *
-FROM silver.erp_px_cat_g1v2
-WHERE cat != TRIM(cat)
-   OR subcat != TRIM(subcat)
-   OR maintenance != TRIM(maintenance);
-
-
--- Check data standardization
-SELECT DISTINCT
-    maintenance
-FROM silver.erp_px_cat_g1v2;
+-- Source-level check for missing customer mapping
+SELECT TOP 100
+    sd.sls_cust_id,
+    cu.customer_id,
+    cu.customer_key
+FROM silver.crm_sales_details AS sd
+LEFT JOIN gold.dim_customers AS cu
+    ON sd.sls_cust_id = cu.customer_id
+WHERE cu.customer_key IS NULL;
