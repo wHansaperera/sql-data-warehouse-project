@@ -125,3 +125,10 @@ FROM silver.crm_sales_details AS sd
 LEFT JOIN gold.dim_customers AS cu
     ON sd.sls_cust_id = cu.customer_id
 WHERE cu.customer_key IS NULL;
+
+-- get gold table
+
+SELECT *
+FROM silver.crm_sales_details AS sd
+LEFT JOIN gold.dim_customers AS cu
+    ON sd.sls_cust_id = cu.customer_id
